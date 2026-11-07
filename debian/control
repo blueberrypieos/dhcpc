@@ -1,0 +1,17 @@
+Source: dhcpc
+Section: net
+Priority: optional
+Maintainer: Maxwell <maxwell@blueberrypieos.com>
+Build-Depends: pietoolchain (>= 0.1.0)
+Standards-Version: 4.7.3
+Homepage: https://github.com/blueberrypieos/dhcpc
+Vcs-Git: https://github.com/blueberrypieos/dhcpc.git
+Vcs-Browser: https://github.com/blueberrypieos/dhcpc
+Rules-Requires-Root: no
+
+Package: dhcpc
+Architecture: darwin-arm64
+Priority: required
+Depends: libsystem
+Description: DHCP client
+ dhcpc, a DHCP client for IPv4, installed as /sbin/dhcpc.

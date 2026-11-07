@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 The Blueberry Pie OS Authors
+
+include /usr/share/pietoolchain/rules.mk
+
+$(OBJ)/dhcpc.o: $(SRCROOT)/dhcpc.c
+	@mkdir -p $(OBJ)
+	$(CC) $(BASE_CFLAGS) -c $< -o $@
+
+$(OBJ)/dhcpc: $(OBJ)/dhcpc.o
+	$(CC) $(BASE_LDFLAGS) $< -o $@
+
+install: $(OBJ)/dhcpc
+	install -d $(ROOT)/sbin
+	install -m 755 $(OBJ)/dhcpc $(ROOT)/sbin/dhcpc
+
+.PHONY: install
