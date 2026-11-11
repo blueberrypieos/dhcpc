@@ -1,3 +1,15 @@
+dhcpc (2) blueberry-pie-os; urgency=medium
+
+  * A clock step no longer ends a lease early. The lease is timed from
+    when the request was sent, by time since the system started.
+  * A lease that can't be renewed ends on time. A T1 at or past the
+    lease's end is taken as half the lease.
+  * A lease the leasing server refuses ends at once. Before T2, a
+    refusal from any other server is ignored. A refused first request
+    starts over at once. A second refusal ends the try.
+
+ -- Maxwell <maxwell@blueberrypieos.com>  Wed, 11 Nov 2026 13:48:21 +0000
+
 dhcpc (1) blueberry-pie-os; urgency=medium
 
   * dhcpc 1

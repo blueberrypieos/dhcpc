@@ -94,6 +94,7 @@ struct lease {
 	int ndns;
 	char domain[256];
 	uint32_t lease, t1, t2;
+	int64_t sent;
 };
 
 static const char *ifname;
@@ -102,6 +103,24 @@ static int bpf = -1;
 static u_int bpflen;
 static uint8_t *bpfbuf;
 static FILE *logfile;
+
+static int64_t
+uptime(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_UPTIME_RAW, &ts);
+	return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void
+nap(int64_t ms)
+{
+	struct timespec ts = { (time_t)(ms / 1000), (long)(ms % 1000) * 1000000 };
+
+	while (ms > 0 && nanosleep(&ts, &ts) != 0 && errno == EINTR) {
+	}
+}
 
 static void
 logmsg(const char *fmt, ...)
@@ -427,13 +446,13 @@ parse_reply(const uint8_t *pkt, size_t len, uint32_t xid, struct lease *l)
 
 /* Wait up to ms for a reply of one of the wanted types to xid. */
 static bool
-wait_reply(uint32_t xid, int ms, int want1, int want2, struct lease *l)
+wait_reply(uint32_t xid, int ms, int want1, int want2, struct in_addr nak_from, struct lease *l)
 {
 	struct timespec start, now;
-	clock_gettime(CLOCK_MONOTONIC, &start);
+	clock_gettime(CLOCK_UPTIME_RAW, &start);
 
 	for (;;) {
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_UPTIME_RAW, &now);
 		long left = ms - ((now.tv_sec - start.tv_sec) * 1000 +
 		    (now.tv_nsec - start.tv_nsec) / 1000000);
 		if (left <= 0) {
@@ -451,7 +470,11 @@ wait_reply(uint32_t xid, int ms, int want1, int want2, struct lease *l)
 			struct bpf_hdr *bh = (struct bpf_hdr *)(void *)p;
 			if (parse_reply(p + bh->bh_hdrlen, bh->bh_caplen, xid, l) &&
 			    (l->type == want1 || l->type == want2)) {
-				return true;
+				if (l->type != DHCPNAK || nak_from.s_addr == 0 ||
+				    l->server.s_addr == nak_from.s_addr) {
+					return true;
+				}
+				l->type = 0;
 			}
 			p += BPF_WORDALIGN(bh->bh_hdrlen + bh->bh_caplen);
 		}
@@ -593,37 +616,57 @@ prefix_len(struct in_addr mask)
  * (renewing), only REQUEST and ACK. tries bounds the attempts.
  */
 static bool
-get_lease(struct lease *cur, int tries, struct lease *out)
+get_lease(struct lease *cur, int tries, int64_t until, struct lease *out)
 {
 	int timeout = 2000;
+	bool refused = false;
 
 	for (int attempt = 0; attempt < tries; attempt++) {
+		if (until != 0) {
+			int64_t left = until - uptime();
+			if (left <= 0) {
+				return false;
+			}
+			if (timeout > left) {
+				timeout = (int)left;
+			}
+		}
 		uint32_t xid = arc4random();
 		uint16_t secs = (uint16_t)(attempt * 2);
 		struct lease offer;
 		struct in_addr none = { 0 };
+		int64_t sent;
 
 		if (cur == NULL) {
 			send_msg(DHCPDISCOVER, xid, secs, none, NULL);
-			if (!wait_reply(xid, timeout, DHCPOFFER, DHCPOFFER, &offer)) {
+			if (!wait_reply(xid, timeout, DHCPOFFER, DHCPOFFER, none, &offer)) {
 				timeout = timeout < 16000 ? timeout * 2 : timeout;
 				continue;
 			}
+			sent = uptime();
 			send_msg(DHCPREQUEST, xid, secs, none, &offer);
 		} else {
+			sent = uptime();
 			send_msg(DHCPREQUEST, xid, secs, cur->addr, NULL);
 		}
-		if (!wait_reply(xid, timeout, DHCPACK, DHCPNAK, out)) {
+		struct in_addr nak_from = cur != NULL ? cur->server : offer.server;
+		if (!wait_reply(xid, timeout, DHCPACK, DHCPNAK, nak_from, out)) {
 			timeout = timeout < 16000 ? timeout * 2 : timeout;
 			continue;
 		}
 		if (out->type == DHCPNAK) {
 			logmsg("%s: server %s refused the lease", ifname, inet_ntoa(out->server));
+			if (cur == NULL && !refused) {
+				refused = true;
+				tries++;
+				continue;
+			}
 			return false;
 		}
 		if (out->addr.s_addr == 0 && cur != NULL) {
 			out->addr = cur->addr;
 		}
+		out->sent = sent;
 		return true;
 	}
 	return false;
@@ -699,7 +742,7 @@ main(int argc, char **argv)
 	for (int t = 0, step = 2; t < wait || tries == 0; t += step, step = step < 16 ? step * 2 : step) {
 		tries++;
 	}
-	bool leased = get_lease(NULL, tries, &l);
+	bool leased = get_lease(NULL, tries, 0, &l);
 	if (leased) {
 		apply(NULL, &l);
 	} else if (once) {
@@ -735,7 +778,7 @@ main(int argc, char **argv)
 	}
 	logfile = fopen("/var/log/dhcpc.log", "a");
 	while (!leased) {
-		leased = get_lease(NULL, 6, &l);       /* about a minute of DISCOVERs */
+		leased = get_lease(NULL, 6, 0, &l);       /* about a minute of DISCOVERs */
 		if (leased) {
 			apply(NULL, &l);
 		} else {
@@ -743,21 +786,39 @@ main(int argc, char **argv)
 		}
 	}
 	for (;;) {
-		uint32_t t1 = l.t1 ? l.t1 : l.lease / 2;
-		time_t expires = time(NULL) + l.lease;
-		sleep(t1);
+		uint32_t t1 = l.t1 && l.t1 < l.lease ? l.t1 : l.lease / 2;
+		uint32_t t2 = l.t2 > t1 && l.t2 < l.lease ? l.t2 : (uint32_t)((uint64_t)l.lease * 7 / 8);
+		if (t2 <= t1) {
+			t2 = t1 + (l.lease - t1) / 2;
+		}
+		int64_t expires = l.sent + (int64_t)l.lease * 1000;
+		int64_t rebind = l.sent + (int64_t)t2 * 1000;
+		nap(l.sent + (int64_t)t1 * 1000 - uptime());
 		bool renewed = false;
-		while (!renewed && time(NULL) < expires) {
-			if (get_lease(&l, 3, &next)) {
-				renewed = true;
+		next.type = 0;
+		while (!renewed && uptime() < expires) {
+			struct lease cur = l;
+			int64_t until = expires;
+			if (uptime() >= rebind) {
+				cur.server.s_addr = 0;
 			} else {
-				sleep(60);
+				until = rebind;
+			}
+			if (get_lease(&cur, 3, until, &next)) {
+				renewed = true;
+			} else if (next.type == DHCPNAK) {
+				break;
+			} else {
+				int64_t left = until - uptime();
+				nap(left < 60000 ? left : 60000);
 			}
 		}
 		if (!renewed) {
-			logmsg("%s: lease of %s expired", ifname, inet_ntoa(l.addr));
+			if (next.type != DHCPNAK) {
+				logmsg("%s: lease of %s expired", ifname, inet_ntoa(l.addr));
+			}
 			del_addr(l.addr);
-			while (!get_lease(NULL, 6, &next)) {
+			while (!get_lease(NULL, 6, 0, &next)) {
 				sleep(30);
 			}
 			apply(NULL, &next);
