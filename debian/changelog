@@ -1,3 +1,14 @@
+dhcpc (3) blueberry-pie-os; urgency=medium
+
+  * Build-Depend on pietoolchain-host and pietoolchain-sdk.
+  * dhcpc writes /var/run/resolv.conf, and /etc/resolv.conf is a link to
+    it, so /etc need not be writable. The link replaces a resolv.conf that
+    dhcpc wrote. A resolv.conf written by hand stays, and dhcpc's name
+    servers are not used then. An upgrade restarts the running dhcpc
+    processes, which would otherwise replace the link.
+
+ -- Maxwell <maxwell@blueberrypieos.com>  Mon, 16 Nov 2026 20:12:33 +0000
+
 dhcpc (2) blueberry-pie-os; urgency=medium
 
   * A clock step no longer ends a lease early. The lease is timed from

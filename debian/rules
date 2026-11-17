@@ -14,5 +14,6 @@ $(OBJ)/dhcpc: $(OBJ)/dhcpc.o
 install: $(OBJ)/dhcpc
 	install -d $(ROOT)/sbin
 	install -m 755 $(OBJ)/dhcpc $(ROOT)/sbin/dhcpc
+	install -D -m 755 debian/postinst $(ROOT)/DEBIAN/postinst
 
 .PHONY: install

@@ -1,0 +1,28 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 The Blueberry Pie OS Authors
+set -e
+[ "$1" = configure ] || exit 0
+r=${DPKG_ROOT:-}
+running=
+if [ -n "${2:-}" ] && [ -z "$r" ] && dpkg --compare-versions "$2" lt 3; then
+	running=$(ps -axo pid=,args= | awk '$2 == "dhcpc" || $2 == "/sbin/dhcpc"')
+	echo "$running" | awk 'NF { print $1 }' | while read -r pid; do
+		kill "$pid" 2>/dev/null || true
+	done
+fi
+if [ ! -L "$r/etc/resolv.conf" ]; then
+	if [ -f "$r/etc/resolv.conf" ] && head -n 1 "$r/etc/resolv.conf" | grep -q '^# written by dhcpc'; then
+		if [ -z "$r" ]; then
+			mv -f /etc/resolv.conf /var/run/resolv.conf
+		else
+			rm -f "$r/etc/resolv.conf"
+		fi
+	fi
+	if [ ! -e "$r/etc/resolv.conf" ]; then
+		ln -s ../var/run/resolv.conf "$r/etc/resolv.conf"
+	fi
+fi
+echo "$running" | awk 'NF { $1 = ""; $2 = ""; print }' | while read -r args; do
+	/sbin/dhcpc $args > /dev/null 2>&1 &
+done

@@ -8,13 +8,13 @@
  *   dhcpc [-1] [-t SECONDS] INTERFACE
  *
  * It gets a lease, gives the interface its address, sets the default route
- * and writes /etc/resolv.conf (and tells mDNSResponder, which resolves
- * names), then stays in the background to renew the
- * lease (-1: exit once configured). -t limits the wait for the first lease
- * (default 30 seconds); the exit status says whether one came. Without
- * one, it goes on asking in the background: at boot the link, a switch
- * port (spanning tree holds a new one for 30 s or more) or the server can
- * take longer than that.
+ * and writes /var/run/resolv.conf, which /etc/resolv.conf links to (and
+ * tells mDNSResponder, which resolves names), then stays in the background
+ * to renew the lease (-1: exit once configured). -t limits the wait for
+ * the first lease (default 30 seconds); the exit status says whether one
+ * came. Without one, it goes on asking in the background: at boot the
+ * link, a switch port (spanning tree holds a new one for 30 s or more) or
+ * the server can take longer than that.
  *
  * dhcpc sends and receives through BPF, since the interface has no
  * address to send from at first.
@@ -572,7 +572,7 @@ set_default_route(struct in_addr router)
 static void
 write_resolv_conf(const struct lease *l)
 {
-	const char *tmp = "/etc/resolv.conf.dhcpc";
+	const char *tmp = "/var/run/resolv.conf.dhcpc";
 	FILE *f;
 
 	if (l->ndns == 0) {
@@ -590,8 +590,8 @@ write_resolv_conf(const struct lease *l)
 	for (int i = 0; i < l->ndns; i++) {
 		fprintf(f, "nameserver %s\n", inet_ntoa(l->dns[i]));
 	}
-	if (fclose(f) != 0 || rename(tmp, "/etc/resolv.conf") != 0) {
-		logmsg("/etc/resolv.conf: %s", strerror(errno));
+	if (fclose(f) != 0 || rename(tmp, "/var/run/resolv.conf") != 0) {
+		logmsg("/var/run/resolv.conf: %s", strerror(errno));
 		return;
 	}
 	/* mDNSResponder re-reads it on a hangup. */
