@@ -4,16 +4,40 @@
 
 include /usr/share/pietoolchain/rules.mk
 
-$(OBJ)/dhcpc.o: $(SRCROOT)/dhcpc.c
+HOST_CC ?= /usr/bin/cc
+HOST_PYTHON ?= /usr/bin/python3
+HOST_CFLAGS := -std=c11 -D_DEFAULT_SOURCE -O1 -Wall -Wextra -Werror -I$(SRCROOT)
+
+$(OBJ)/%.o: $(SRCROOT)/%.c $(SRCROOT)/client.h $(SRCROOT)/msg.h $(SRCROOT)/state.h
 	@mkdir -p $(OBJ)
-	$(CC) $(BASE_CFLAGS) -c $< -o $@
+	$(CC) $(BASE_CFLAGS) -Wall -Wextra -c $< -o $@
 
-$(OBJ)/dhcpc: $(OBJ)/dhcpc.o
-	$(CC) $(BASE_LDFLAGS) $< -o $@
+$(OBJ)/dhcpc: $(OBJ)/dhcpc.o $(OBJ)/client.o $(OBJ)/msg.o $(OBJ)/state.o
+	$(CC) $(BASE_LDFLAGS) $^ -o $@
 
-install: $(OBJ)/dhcpc
+$(OBJ)/test_client: $(SRCROOT)/tests/test_client.c $(SRCROOT)/client.c $(SRCROOT)/client.h
+	@mkdir -p $(OBJ)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(SRCROOT)/tests/test_client.c $(SRCROOT)/client.c
+
+$(OBJ)/test_msg: $(SRCROOT)/tests/test_msg.c $(SRCROOT)/msg.c $(SRCROOT)/client.c $(SRCROOT)/msg.h \
+    $(SRCROOT)/client.h
+	@mkdir -p $(OBJ)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(SRCROOT)/tests/test_msg.c $(SRCROOT)/msg.c $(SRCROOT)/client.c
+
+$(OBJ)/test_state: $(SRCROOT)/tests/test_state.c $(SRCROOT)/state.c $(SRCROOT)/client.c \
+    $(SRCROOT)/state.h $(SRCROOT)/client.h
+	@mkdir -p $(OBJ)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(SRCROOT)/tests/test_state.c $(SRCROOT)/state.c $(SRCROOT)/client.c
+
+check: $(OBJ)/test_client $(OBJ)/test_msg $(OBJ)/test_state
+	$(OBJ)/test_client
+	$(OBJ)/test_msg
+	$(OBJ)/test_state
+	$(HOST_PYTHON) $(SRCROOT)/tests/test_postinst.py
+
+install: check $(OBJ)/dhcpc
 	install -d $(ROOT)/sbin
 	install -m 755 $(OBJ)/dhcpc $(ROOT)/sbin/dhcpc
 	install -D -m 755 debian/postinst $(ROOT)/DEBIAN/postinst
 
-.PHONY: install
+.PHONY: check install

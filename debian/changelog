@@ -1,3 +1,30 @@
+dhcpc (4) blueberry-pie-os; urgency=medium
+
+  * Add dhcpc -a to supervise one client per Ethernet interface,
+    including interfaces attached after startup. The supervisor runs in
+    the foreground and restarts stopped clients.
+  * Keep valid leases across interface removal and link changes.
+    Revalidate the lease when the link or the same adapter returns,
+    request a new lease if the hardware address changes, and recover
+    existing leases after a client restart.
+  * Coordinate the default route and DNS settings across interfaces,
+    preferring confirmed leases and then the lowest-numbered eligible
+    interface. If no interface is eligible yet, preserve the current
+    route and DNS settings while confirming an address left without a
+    lease record after a soft reboot or upgrade.
+  * Maintain interface-scoped subnet routes and restore missing routes
+    when applying a lease. Avoid resetting unchanged addresses and routes
+    so ARP entries survive renewals.
+  * Record leases and managed routes for recovery after client restarts,
+    and retry failed address configuration and cleanup.
+  * Renew leases by unicast to the server through the leased interface;
+    broadcast when rebinding. Validate reply headers, required fields
+    and nonzero UDP checksums, and support overloaded and repeated
+    options.
+  * Log lease activity and link changes to /var/log/dhcpc.log.
+
+ -- Maxwell <maxwell@blueberrypieos.com>  Fri, 20 Nov 2026 04:31:15 +0000
+
 dhcpc (3) blueberry-pie-os; urgency=medium
 
   * Build-Depend on pietoolchain-host and pietoolchain-sdk.
